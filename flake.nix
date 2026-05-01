@@ -3,6 +3,10 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+    nix = {
+      url = "github:NixOS/nix/2.34-maintenance";
+      flake = false;
+    };
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -13,6 +17,7 @@
     {
       self,
       nixpkgs,
+      nix,
       treefmt-nix,
     }:
 
@@ -25,10 +30,33 @@
         "x86_64-darwin"
         "aarch64-darwin"
       ];
+      nixComponentsFor =
+        pkgs:
+        let
+          inherit (pkgs) lib;
+          nixDependencies = lib.makeScope pkgs.newScope (
+            import (nix + "/packaging/dependencies.nix") {
+              inherit pkgs;
+              inherit (pkgs) stdenv;
+              inputs = { };
+            }
+          );
+        in
+        lib.makeScope nixDependencies.newScope (
+          import (nix + "/packaging/components.nix") {
+            officialRelease = true;
+            inherit lib pkgs;
+            src = nix;
+            maintainers = [ ];
+          }
+        );
       treefmtFor =
         pkgs:
         treefmt-nix.lib.evalModule pkgs {
           projectRootFile = "flake.lock";
+
+          programs.clang-format.enable = true;
+          programs.meson.enable = true;
           programs.nixfmt.enable = true;
         };
     in
@@ -37,7 +65,7 @@
       overlays.default = final: prev: {
         nix-serve = final.pkgs.callPackage ./package.nix {
           inherit self;
-          nixComponents = final.nixVersions.nixComponents_git;
+          nixComponents = nixComponentsFor final.pkgs;
         };
       };
 
@@ -48,9 +76,9 @@
         in
         rec {
           default = nix-serve;
-          nix-serve = nixpkgs.legacyPackages.${system}.callPackage ./package.nix {
+          nix-serve = pkgs.callPackage ./package.nix {
             inherit self;
-            nixComponents = pkgs.nixVersions.nixComponents_git;
+            nixComponents = nixComponentsFor pkgs;
           };
         }
       );
